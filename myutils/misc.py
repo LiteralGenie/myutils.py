@@ -1,41 +1,59 @@
+from queue import Queue
 from dataclasses import dataclass, field
 from contextlib import asynccontextmanager
 import asyncio
-import time
 
 
 @dataclass(kw_only=True)
 class RateLimiter:
     max_requests: int = 3
     max_requests_period: float = 5
-    sem: asyncio.Semaphore = field(init=False)
-    times: list[float] = field(default_factory=list)
-    req_count: int = 0
 
-    def __post_init__(self):
-        self.sem = asyncio.Semaphore(self.max_requests)
+    _cooldowns: dict[int, asyncio.Task] = field(default_factory=dict)
+    _queue: Queue[dict] = field(default_factory=Queue)
+    _nextTicketId: int = 0
 
     @asynccontextmanager
     async def acquire(self):
-        async with self.sem:
-            req_count = self.req_count
-            self.req_count += 1
+        ready_flag = asyncio.Event()
+        ticket: dict = dict(
+            id=self._nextTicketId,
+            event=ready_flag,
+        )
+        self._nextTicketId += 1
+        self._queue.put(ticket)
 
-            if req_count >= self.max_requests:
-                oldest_time = self.times.pop(0)
-                rem_delay = self.max_requests_period - (time.time() - oldest_time)
-                if rem_delay > 0:
-                    await asyncio.sleep(rem_delay)
+        self._consume_queue()
+        await ready_flag.wait()
 
-            is_cancelled = False
+        is_cancelled = False
 
-            def cancel():
-                nonlocal is_cancelled
-                is_cancelled = True
+        def cancel():
+            nonlocal is_cancelled
+            is_cancelled = True
 
-            yield cancel
+        yield cancel
 
-            if not is_cancelled:
-                self.times.append(time.time())
-            else:
-                self.req_count -= 1
+        if not is_cancelled:
+            self._start_cooldown(ticket["id"])
+        else:
+            self._consume_queue()
+
+    def _consume_queue(self):
+        if len(self._cooldowns) >= self.max_requests:
+            return
+
+        if self._queue.qsize() == 0:
+            return
+
+        ticket = self._queue.get()
+        ticket["event"].set()
+
+    def _start_cooldown(self, id: int):
+        async def cd():
+            await asyncio.sleep(self.max_requests_period)
+            del self._cooldowns[id]
+
+            self._consume_queue()
+
+        self._cooldowns[id] = asyncio.create_task(cd())
