@@ -1,3 +1,4 @@
+import time
 from queue import Queue
 from dataclasses import dataclass, field
 from contextlib import asynccontextmanager
@@ -52,8 +53,46 @@ class RateLimiter:
     def _start_cooldown(self, id: int):
         async def cd():
             await asyncio.sleep(self.max_requests_period)
+
+            task = self._cooldowns[id]
             del self._cooldowns[id]
 
             self._consume_queue()
 
         self._cooldowns[id] = asyncio.create_task(cd())
+
+
+class DebugTimer:
+    def __init__(
+        self,
+        format=".2f",
+        reset_on_read=False,
+    ):
+        self.start = time.time()
+        self.format = format
+        self.reset_on_read = reset_on_read
+
+    def reset(self):
+        self.start = time.time()
+        return self
+
+    @property
+    def elapsed(self):
+        return time.time() - self.start
+
+    @property
+    def t(self):
+        return f"{self.elapsed:{self.format}}"
+
+    def tr(self):
+        t = self.t
+        self.reset()
+        return t
+
+    def __str__(self):
+        elapsed_str = self.t
+
+        if self.reset_on_read:
+            self.reset()
+
+        return elapsed_str
