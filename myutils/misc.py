@@ -10,56 +10,60 @@ class RateLimiter:
     max_requests: int = 3
     max_requests_period: float = 5
 
-    _cooldowns: dict[int, asyncio.Task] = field(default_factory=dict)
-    _queue: Queue[dict] = field(default_factory=Queue)
-    _nextTicketId: int = 0
+    _active: set[asyncio.Event] = field(default_factory=set)
+    _cooldowns: dict[asyncio.Event, asyncio.Task] = field(default_factory=dict)
+    _queue: Queue[asyncio.Event] = field(default_factory=Queue)
 
     @asynccontextmanager
     async def acquire(self):
-        ready_flag = asyncio.Event()
-        ticket: dict = dict(
-            id=self._nextTicketId,
-            event=ready_flag,
-        )
-        self._nextTicketId += 1
+        # Create ticket
+        ticket = asyncio.Event()
         self._queue.put(ticket)
-
         self._consume_queue()
-        await ready_flag.wait()
+        await ticket.wait()
 
+        # Yield to caller
+        # fmt: off
         is_cancelled = False
-
         def cancel():
             nonlocal is_cancelled
             is_cancelled = True
-
         yield cancel
+        # fmt: on
 
+        # Any tickets in cooldown count against rate limit
+        # So if caller says nvm, avoid cd penalty
         if not is_cancelled:
-            self._start_cooldown(ticket["id"])
-        else:
-            self._consume_queue()
+            self._start_cooldown(ticket)
 
+        # Cleanup
+        self._active.remove(ticket)
+        self._consume_queue()
+
+    # Call this on any ticket CRUD
+    # This checks if we are under the rate limit and pops / unblocks a queued ticket
     def _consume_queue(self):
-        if len(self._cooldowns) >= self.max_requests:
+        if len(self._cooldowns) + len(self._active) >= self.max_requests:
             return
 
         if self._queue.qsize() == 0:
             return
 
         ticket = self._queue.get()
-        ticket["event"].set()
+        ticket.set()
+        self._active.add(ticket)
 
-    def _start_cooldown(self, id: int):
+    # Basically treat a rate limiter with N reqs per T seconds
+    # as N individual rate limiters capped to 1 req per T seconds
+    def _start_cooldown(self, ticket: asyncio.Event):
         async def cd():
             await asyncio.sleep(self.max_requests_period)
 
-            task = self._cooldowns[id]
-            del self._cooldowns[id]
+            del self._cooldowns[ticket]
 
             self._consume_queue()
 
-        self._cooldowns[id] = asyncio.create_task(cd())
+        self._cooldowns[ticket] = asyncio.create_task(cd())
 
 
 class DebugTimer:
