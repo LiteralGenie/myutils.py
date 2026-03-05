@@ -3,6 +3,7 @@ from queue import Queue
 from dataclasses import dataclass, field
 from contextlib import asynccontextmanager
 import asyncio
+from typing import TypeVar, Callable, overload, Any
 
 
 @dataclass(kw_only=True)
@@ -100,3 +101,39 @@ class DebugTimer:
             self.reset()
 
         return elapsed_str
+
+
+T = TypeVar("T")
+U = TypeVar("U")
+
+# fmt:off
+@overload
+def nn_(x: T | None) -> T: ...
+# These 2-arg overloads don't actually work in extracting T from T|U ...
+@overload
+def nn_(x: T | U, check: Callable[[T | U], bool]) -> Any: ...
+@overload
+def nn_(x: T | U, check: U) -> T: ...
+# @overload
+# def nn_(x: T | U, check: Callable[[T | None], T]) -> T: ...
+@overload
+def nn_(x: T | U, check: Callable[[T | U], bool] | U, cast_to: type[T]) -> T: ...
+# fmt:on
+
+
+def nn_(
+    x,
+    check=None,
+    type_=None,
+) -> T | U:
+    if callable(check):
+        result = check(x)
+        if isinstance(result, bool) and result:
+            raise ValueError(f"{x!r} invalid (fails {check!r})")
+        elif result is None:
+            raise ValueError(f"{x!r} invalid (fails {check!r})")
+    else:
+        if x == check:
+            raise ValueError(f"{x!r} invalid (equals {check!r})")
+
+    return x
