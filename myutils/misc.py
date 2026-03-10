@@ -3,7 +3,7 @@ from queue import Queue
 from dataclasses import dataclass, field
 from contextlib import asynccontextmanager
 import asyncio
-from typing import TypeVar, Callable, overload, Any
+from typing import TypeVar, Callable, overload, Any, Iterable
 
 
 @dataclass(kw_only=True)
@@ -137,3 +137,7 @@ def nn_(
             raise ValueError(f"{x!r} invalid (equals {check!r})")
 
     return x
+
+
+def filter_none(xs: Iterable[T | None]) -> Any:
+    return (x for x in xs if x is not None)
