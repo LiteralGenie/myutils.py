@@ -23,23 +23,24 @@ class RateLimiter:
         self._consume_queue()
         await ticket.wait()
 
-        # Yield to caller
-        # fmt: off
-        is_cancelled = False
-        def cancel():
-            nonlocal is_cancelled
-            is_cancelled = True
-        yield cancel
-        # fmt: on
+        try:
+            # Yield to caller
+            # fmt: off
+            is_cancelled = False
+            def cancel():
+                nonlocal is_cancelled
+                is_cancelled = True
+            yield cancel
+            # fmt: on
+        finally:
+            # Any tickets in cooldown count against rate limit
+            # So if caller says nvm, avoid cd penalty
+            if not is_cancelled:
+                self._start_cooldown(ticket)
 
-        # Any tickets in cooldown count against rate limit
-        # So if caller says nvm, avoid cd penalty
-        if not is_cancelled:
-            self._start_cooldown(ticket)
-
-        # Cleanup
-        self._active.remove(ticket)
-        self._consume_queue()
+            # Cleanup
+            self._active.remove(ticket)
+            self._consume_queue()
 
     # Call this on any ticket CRUD
     # This checks if we are under the rate limit and pops / unblocks a queued ticket
