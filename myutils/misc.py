@@ -1,9 +1,9 @@
-import time
-from queue import Queue
-from dataclasses import dataclass, field
-from contextlib import asynccontextmanager
 import asyncio
-from typing import TypeVar, Callable, overload, Any, Iterable
+import time
+from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
+from queue import Queue
+from typing import Any, Callable, Iterable, TypeVar, overload
 
 
 @dataclass(kw_only=True)
@@ -106,6 +106,7 @@ class DebugTimer:
 
 T = TypeVar("T")
 U = TypeVar("U")
+
 
 # fmt:off
 @overload
